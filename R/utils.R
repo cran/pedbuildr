@@ -11,6 +11,7 @@ isCount = function(x, minimum = 1, maximum = NA) {
 }
 
 # Sample from Dirichlet distribution with mean p (where b controls variance)
+# Unused?
 #' @importFrom stats rgamma
 rdirich = function(n, p, b = 1) {
   if(!is.numeric(b) || length(b) != 1 || b <= 0)
@@ -105,12 +106,17 @@ ftime = function(st, digits = 3)
   }
 }
 
+# Fast intersection. NB: assumes no duplicates!
+.myintersect = function (x, y) {
+  y[match(x, y, 0L)]
+}
+
 # Stripped version of expand.grid
 fast.grid = function(argslist, as.list = FALSE) {
   nargs = length(argslist)
   orep = nr = prod(lengths(argslist))
   if (nargs == 0L || nr == 0L)
-    return(matrix(ncol = 0, nrow = 0))
+    return(if(as.list) list() else matrix(ncol = 0, nrow = 0))
 
   rep.fac = 1L
   res = NULL

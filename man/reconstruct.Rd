@@ -15,15 +15,17 @@ reconstruct(
   sex = NULL,
   age = NULL,
   knownPO = NULL,
+  knownSub = NULL,
   allKnown = FALSE,
   notPO = NULL,
   noChildren = NULL,
   connected = TRUE,
-  linearInb = TRUE,
-  maxLinearInb = NULL,
+  maxInbreeding = 1/16,
+  linearInb = FALSE,
   sexSymmetry = TRUE,
   sortResults = TRUE,
   founderInb = 0,
+  numCores = 1,
   verbose = TRUE
 )
 }
@@ -33,35 +35,36 @@ reconstruct(
 \item{ids}{A vector of ID labels from \code{x}. By default, the genotyped members
 of \code{x} are used.}
 
-\item{extra}{Either the word "parents", or a nonnegative integer. See
-details.}
+\item{extra}{Either the word "parents" (default), or a non-negative integer.
+See Details.}
 
-\item{alleleMatrix}{A matrix with two columns for each marker.}
+\item{alleleMatrix}{A matrix with two columns for each marker. By default
+extracted from \code{x}}
 
-\item{loci}{A list of marker attributes.}
+\item{loci}{A list of marker attributes. By default extracted from \code{x}.}
 
-\item{pedlist}{A list of pedigrees. If NULL, \code{\link[=buildPeds]{buildPeds()}} is used to
-generate a list.}
+\item{pedlist}{A list of pedigrees to optimise over. If NULL, \code{\link[=buildPeds]{buildPeds()}}
+is used to generate a list.}
 
 \item{inferPO}{A logical. If TRUE, an initial stage of pairwise IBD
-estimation is done, in order to infer certain parent-child pairs, as well
-as certain \emph{non}-parent-child pairs. When this option is used, arguments to
-\code{knownPO} and \code{notPO} are ignored.}
+estimation is done to infer high-confidence parent/child pairs, and also
+\emph{non}-parent/child pairs. When this option is used, arguments to \code{knownPO}
+and \code{notPO} are ignored.}
 
 \item{sex}{A vector of the same length as \code{labs}, with entries 1 (male) or 2
 (female).}
 
 \item{age}{A numeric or character vector. If numeric, and \code{age[i] < age[j]},
 then individual \code{i} will not be an ancestor of individual \code{j}. The numbers
-themselves are irrelevant, only the partial ordering. Note that no
-interpretation is made about individuals of equal age.
-
-Alternatively \code{age} may be a character vector of inequalities, e.g., \code{age = c("1>2", "1>3")}. This syntax allows finer control than the numeric
-version.}
+themselves are irrelevant, only the partial ordering. (No inference is made
+about individuals of equal age.) Alternatively, for finer control, \code{age}
+may be a character vector of inequalities, e.g., \code{age = c("1>2", "1>3")}.}
 
 \item{knownPO}{A list of vectors of length 2, containing the ID labels of
 pairs known to be parent-offspring. By default, both directions are
 considered; use \code{age} to force a specific direction.}
+
+\item{knownSub}{A \code{ped} object involving a subset of the \code{labs} individuals.}
 
 \item{allKnown}{A logical. If TRUE, no other pairs than \code{knownPO} will be
 assigned as parent-offspring. If FALSE (default), all pairs except those in
@@ -76,24 +79,28 @@ children of their own.}
 \item{connected}{A logical. If TRUE (default), only connected pedigrees are
 returned.}
 
-\item{linearInb}{Either TRUE (allow any linear inbreeding), FALSE (disallow
-linear inbreeding) or a nonnegative integer indicating the maximum
-separation linearly related spouses. For example, \code{linearInb = 1} allows
-mating between parent and child, but not between grandparent and grandchild
-(or more distant).}
+\item{maxInbreeding}{A single numeric indicating the highest permitted
+inbreeding coefficient. Default: 1/16 (as with first-cousin parents.)}
 
-\item{maxLinearInb}{Deprecated; replaced by \code{linearInb}.}
+\item{linearInb}{A parameter controlling the maximum separation of linearly
+related spouses. Either TRUE (allow all linear inbreeding), FALSE (disallow
+all) or a non-negative integer. For example, \code{linearInb = 1} allows
+parent/child mating, but not grandparent/grandchild or more distant linear
+relatives. Default: FALSE.}
 
 \item{sexSymmetry}{A logical. If TRUE (default), pedigrees which are equal
 except for the gender distribution of the \emph{added} parents, are regarded as
 equivalent, and only one of each equivalence class is returned. Example:
 paternal vs. maternal half sibs.}
 
-\item{sortResults}{A logical. If TRUE, the output is sorted so that the most
-likely pedigree comes first.}
+\item{sortResults}{A logical. If TRUE (default), the output is sorted so that
+the most likely pedigree comes first.}
 
 \item{founderInb}{A number in the interval \verb{[0,1]}, used as background
-inbreeding level in all founders.}
+inbreeding level in all founders. Default: 0.}
+
+\item{numCores}{A positive integer. The number of cores used in
+parallelisation. Default: 1.}
 
 \item{verbose}{A logical.}
 }
@@ -101,6 +108,7 @@ inbreeding level in all founders.}
 An object of class \code{pedrec}, which is essentially list with the
 following entries:
 \itemize{
+\item \code{labs}: The individual labels as given in \code{ids}.
 \item \code{pedlist}: A list of pedigrees, either built by \code{\link[=buildPeds]{buildPeds()}} or as
 supplied in the input argument \code{pedlist}. If \code{sortResults = TRUE}, the list
 is sorted so that the most likely pedigrees come first
@@ -114,7 +122,7 @@ failed
 }
 }
 \description{
-Reconstruct the most likely pedigree from genotype data.
+Reconstructs the most likely pedigree from genotype data.
 }
 \details{
 The parameter \code{extra} controls which of two algorithms are used to create the
@@ -137,41 +145,34 @@ best in smaller cases.
 # Example 1: Trio
 #-----------------
 
-data(trioData)
+# Built-in dataset `trioData`
+x = list(singleton(1), singleton(2), singleton(3)) |>
+  setMarkers(alleleMatrix = trioData, locusAttributes ="snp12")
 
-x = as.ped(trioData, locusAttributes = "snp-12")
-summary(x)
-
-res = reconstruct(x, inferPO = TRUE, age = "1 > 2", linearInb = FALSE)
+res = reconstruct(x, inferPO = TRUE, age = "1 > 2")
 
 # Plot most likely pedigrees
 plot(res, top = 6)
 
 
-### Alternative workflow: Extract data manually...
-als  = getAlleles(x)
-loci = getLocusAttributes(x)
-sex  = getSex(x)
-
-# ...and then reconstruct
-res2 = reconstruct(alleleMatrix = als, loci = loci, sex = sex,
-                   inferPO = TRUE, age = "1 > 2", linearInb = FALSE)
-
-stopifnot(identical(res, res2))
-
 #--------------------
 # Example 2: Siblings
 #--------------------
+library(forrel)
 
 ids = c("s1", "s2")
-y = nuclearPed(children = ids)
 
-# Simulate data
-y = forrel::markerSim(y, N = 50, ids = ids, seed = 123)
+# Create pedigree and simulate profiles with 20 STR markers
+y = nuclearPed(children = ids) |>
+  profileSim(markers = NorwegianFrequencies[1:20], ids = ids, seed = 123)
 
-# Reconstruct and plot
-res3 = reconstruct(y, connected = FALSE)
-res3
+# Reconstruct allowing 2 extra individuals and any inbreeding
+res2 = reconstruct(y, extra = 2, maxInb = 1)
+plot(res2)
+
+# With mutation modelling
+y = setMutmod(y, model = "equal", rate = 0.01)
+res3 = reconstruct(y, extra = 2, maxInb = 1)
 plot(res3)
 
 }

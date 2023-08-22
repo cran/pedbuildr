@@ -6,16 +6,17 @@
 \usage{
 buildPeds(
   labs,
-  sex,
+  sex = 1,
   extra = "parents",
   age = NULL,
   knownPO = NULL,
+  knownSub = NULL,
   allKnown = FALSE,
   notPO = NULL,
   noChildren = NULL,
   connected = TRUE,
-  linearInb = TRUE,
-  maxLinearInb = NULL,
+  maxInbreeding = 1/16,
+  linearInb = FALSE,
   sexSymmetry = TRUE,
   verbose = TRUE
 )
@@ -26,20 +27,20 @@ buildPeds(
 \item{sex}{A vector of the same length as \code{labs}, with entries 1 (male) or 2
 (female).}
 
-\item{extra}{Either the word "parents", or a nonnegative integer. See
-details.}
+\item{extra}{Either the word "parents" (default), or a non-negative integer.
+See Details.}
 
 \item{age}{A numeric or character vector. If numeric, and \code{age[i] < age[j]},
 then individual \code{i} will not be an ancestor of individual \code{j}. The numbers
-themselves are irrelevant, only the partial ordering. Note that no
-interpretation is made about individuals of equal age.
-
-Alternatively \code{age} may be a character vector of inequalities, e.g., \code{age = c("1>2", "1>3")}. This syntax allows finer control than the numeric
-version.}
+themselves are irrelevant, only the partial ordering. (No inference is made
+about individuals of equal age.) Alternatively, for finer control, \code{age}
+may be a character vector of inequalities, e.g., \code{age = c("1>2", "1>3")}.}
 
 \item{knownPO}{A list of vectors of length 2, containing the ID labels of
 pairs known to be parent-offspring. By default, both directions are
 considered; use \code{age} to force a specific direction.}
+
+\item{knownSub}{A \code{ped} object involving a subset of the \code{labs} individuals.}
 
 \item{allKnown}{A logical. If TRUE, no other pairs than \code{knownPO} will be
 assigned as parent-offspring. If FALSE (default), all pairs except those in
@@ -54,13 +55,14 @@ children of their own.}
 \item{connected}{A logical. If TRUE (default), only connected pedigrees are
 returned.}
 
-\item{linearInb}{Either TRUE (allow any linear inbreeding), FALSE (disallow
-linear inbreeding) or a nonnegative integer indicating the maximum
-separation linearly related spouses. For example, \code{linearInb = 1} allows
-mating between parent and child, but not between grandparent and grandchild
-(or more distant).}
+\item{maxInbreeding}{A single numeric indicating the highest permitted
+inbreeding coefficient. Default: 1/16 (as with first-cousin parents.)}
 
-\item{maxLinearInb}{Deprecated; replaced by \code{linearInb}.}
+\item{linearInb}{A parameter controlling the maximum separation of linearly
+related spouses. Either TRUE (allow all linear inbreeding), FALSE (disallow
+all) or a non-negative integer. For example, \code{linearInb = 1} allows
+parent/child mating, but not grandparent/grandchild or more distant linear
+relatives. Default: FALSE.}
 
 \item{sexSymmetry}{A logical. If TRUE (default), pedigrees which are equal
 except for the gender distribution of the \emph{added} parents, are regarded as
@@ -70,8 +72,7 @@ paternal vs. maternal half sibs.}
 \item{verbose}{A logical.}
 }
 \value{
-A list of pedigrees. Each element is a \code{ped} object or a list of
-such.
+A list of (possibly disconnected) pedigrees.
 }
 \description{
 Build all pedigrees between a set of individuals, subject to given
@@ -94,17 +95,25 @@ advantage of not requiring an explicit/ad hoc number of "extras", but works
 best in smaller cases.
 }
 \examples{
+# Two individuals + 1 extra
+plist = buildPeds(1:2, extra = 1, age = "1>2")
+plot(plist)
 
-# Showing off a few of the options
-plist = buildPeds(1:3, sex = c(1,2,1), extra = 1, knownPO = list(1:2),
-                  age = "1 > 2", linearInb = FALSE)
-stopifnot(length(plist) == 12)
+# Allow disconnected
+plist2 = buildPeds(1:2, extra = 1, age = "1>2", connected = FALSE)
+plot(plist2, frames = TRUE)
 
+# Note that full sibs require 2 extras
+plist3 = buildPeds(1:2, extra = 2, age = "1>2")
+plot(plist3)
 
-# Slightly different output with `extra = "parents"`
-plist2 = buildPeds(1:3, sex = c(1,2,1), extra = "parents", knownPO = list(1:2),
-                   age = "1 > 2", linearInb = FALSE)
-stopifnot(length(plist2) == 8)
+# With 2 extras, allowing any inbreeding
+plist4 = buildPeds(1:2, extra = 2, age = "1>2", maxInbreeding = 1)
+plot(plist4)
+
+# Full sibs are also included when `extra = "parents"`
+plist5 = buildPeds(1:2, extra = "parents", age = "1>2")
+plot(plist5)
 
 
 }

@@ -21,19 +21,17 @@
 #' @param labs A character vector of ID labels.
 #' @param sex A vector of the same length as `labs`, with entries 1 (male) or 2
 #'   (female).
-#' @param extra Either the word "parents", or a nonnegative integer. See
-#'   details.
+#' @param extra Either the word "parents" (default), or a non-negative integer.
+#'   See Details.
 #' @param age A numeric or character vector. If numeric, and `age[i] < age[j]`,
 #'   then individual `i` will not be an ancestor of individual `j`. The numbers
-#'   themselves are irrelevant, only the partial ordering. Note that no
-#'   interpretation is made about individuals of equal age.
-#'
-#'   Alternatively `age` may be a character vector of inequalities, e.g., `age =
-#'   c("1>2", "1>3")`. This syntax allows finer control than the numeric
-#'   version.
+#'   themselves are irrelevant, only the partial ordering. (No inference is made
+#'   about individuals of equal age.) Alternatively, for finer control, `age`
+#'   may be a character vector of inequalities, e.g., `age = c("1>2", "1>3")`.
 #' @param knownPO A list of vectors of length 2, containing the ID labels of
 #'   pairs known to be parent-offspring. By default, both directions are
 #'   considered; use `age` to force a specific direction.
+#' @param knownSub A `ped` object involving a subset of the `labs` individuals.
 #' @param allKnown A logical. If TRUE, no other pairs than `knownPO` will be
 #'   assigned as parent-offspring. If FALSE (default), all pairs except those in
 #'   `notPO` are treated as potential parent-offspring.
@@ -43,52 +41,58 @@
 #'   children of their own.
 #' @param connected A logical. If TRUE (default), only connected pedigrees are
 #'   returned.
-#' @param linearInb Either TRUE (allow any linear inbreeding), FALSE (disallow
-#'   linear inbreeding) or a nonnegative integer indicating the maximum
-#'   separation linearly related spouses. For example, `linearInb = 1` allows
-#'   mating between parent and child, but not between grandparent and grandchild
-#'   (or more distant).
-#' @param maxLinearInb Deprecated; replaced by `linearInb`.
+#' @param maxInbreeding A single numeric indicating the highest permitted
+#'   inbreeding coefficient. Default: 1/16 (as with first-cousin parents.)
+#' @param linearInb A parameter controlling the maximum separation of linearly
+#'   related spouses. Either TRUE (allow all linear inbreeding), FALSE (disallow
+#'   all) or a non-negative integer. For example, `linearInb = 1` allows
+#'   parent/child mating, but not grandparent/grandchild or more distant linear
+#'   relatives. Default: FALSE.
 #' @param sexSymmetry A logical. If TRUE (default), pedigrees which are equal
 #'   except for the gender distribution of the *added* parents, are regarded as
 #'   equivalent, and only one of each equivalence class is returned. Example:
 #'   paternal vs. maternal half sibs.
 #' @param verbose A logical.
 #'
-#' @return A list of pedigrees. Each element is a `ped` object or a list of
-#'   such.
+#' @return A list of (possibly disconnected) pedigrees.
 #'
 #' @examples
+#' # Two individuals + 1 extra
+#' plist = buildPeds(1:2, extra = 1, age = "1>2")
+#' plot(plist)
 #'
-#' # Showing off a few of the options
-#' plist = buildPeds(1:3, sex = c(1,2,1), extra = 1, knownPO = list(1:2),
-#'                   age = "1 > 2", linearInb = FALSE)
-#' stopifnot(length(plist) == 12)
+#' # Allow disconnected
+#' plist2 = buildPeds(1:2, extra = 1, age = "1>2", connected = FALSE)
+#' plot(plist2, frames = TRUE)
 #'
+#' # Note that full sibs require 2 extras
+#' plist3 = buildPeds(1:2, extra = 2, age = "1>2")
+#' plot(plist3)
 #'
-#' # Slightly different output with `extra = "parents"`
-#' plist2 = buildPeds(1:3, sex = c(1,2,1), extra = "parents", knownPO = list(1:2),
-#'                    age = "1 > 2", linearInb = FALSE)
-#' stopifnot(length(plist2) == 8)
+#' # With 2 extras, allowing any inbreeding
+#' plist4 = buildPeds(1:2, extra = 2, age = "1>2", maxInbreeding = 1)
+#' plot(plist4)
+#'
+#' # Full sibs are also included when `extra = "parents"`
+#' plist5 = buildPeds(1:2, extra = "parents", age = "1>2")
+#' plot(plist5)
 #'
 #'
 #' @export
-buildPeds = function(labs, sex, extra = "parents", age = NULL, knownPO = NULL, allKnown = FALSE,
-                     notPO = NULL, noChildren = NULL, connected = TRUE, linearInb = TRUE,
-                     maxLinearInb = NULL, sexSymmetry = TRUE, verbose = TRUE) {
-
-  if(!is.null(maxLinearInb)) {
-    warning("The argument `maxLinearInb` has been replaced with `linearInb`. Use this in new code.")
-    linearInb = maxLinearInb
-  }
+buildPeds = function(labs, sex = 1, extra = "parents", age = NULL, knownPO = NULL, knownSub = NULL,
+                     allKnown = FALSE, notPO = NULL, noChildren = NULL, connected = TRUE,
+                     maxInbreeding = 1/16, linearInb = FALSE, sexSymmetry = TRUE, verbose = TRUE) {
 
   N = length(labs)
-  ids = seq_along(labs)
+  labs = as.character(labs)
 
-  if(length(sex) != N)
+  if(length(sex) == 1)
+    sex = rep(sex, N)
+  else if(length(sex) != N)
     stop2("`labs` and `sex` must have the same length\nlabs: ", labs, "\nsex: ", sex)
 
-  if(!(identical(extra, "parents") || isCount(extra, minimum = 0)))
+  extraNum = !identical(extra, "parents")
+  if(extraNum && !isCount(extra, minimum = 0))
      stop2('`extra` must be either the word "parents" or a nonnegative integer: ', extra)
 
   if(allKnown) {
@@ -98,25 +102,46 @@ buildPeds = function(labs, sex, extra = "parents", age = NULL, knownPO = NULL, a
       stop2("`notPO` must be NULL when `allKnown = TRUE`")
   }
 
+  # Check that IDs used are known or allowed extras (e1, e2, ...)
   checkLabs = c(unlist(knownPO), unlist(notPO), noChildren)
   if(!all(checkLabs %in% labs))
-    stop2("Unknown pedigree member: ", setdiff(labs, checkLabs))
+    stop2("Unknown pedigree member: ", setdiff(checkLabs, labs))
 
+  # Convert numeric age vector to vector of inequalities
+  if(is.numeric(age))
+    age = convertNumAge(age, labs)
+
+  # Convert knownSub to knownPO + age
+  if(!is.null(knownSub)) {
+    subDat = convertKnownSub(knownSub, labs, sex)
+    knownPO = c(knownPO, subDat$knownPO)
+    age = c(age, subDat$age)
+  }
+
+  # Convert age inequalities into matrix with all ordered pairs (works with NULL)
+  ageMat = parseAge(age, labs)
+
+  # Convert to indices
   knownPO_int = lapply(knownPO, function(p) match(p, labs))
   notPO_int = lapply(notPO, function(p) match(p, labs))
   noChildren_int = match(noChildren, labs)
-
-  # Convert age vector into matrix with all ordered pairs (works with NULL)
-  if(is.numeric(age))
-    age = convertNumAge(age, labs)
-  ageMat = parseAge(age, labs)
 
   # Check noChildren, and convert to internal
   if(!all(noChildren %in% labs))
     stop2("Unknown label in `noChildren`: ", setdiff(noChildren, labs))
 
+  # Check `maxInbreeding`
+  if(length(maxInbreeding) != 1 || !is.numeric(maxInbreeding) || maxInbreeding < 0 || maxInbreeding > 1)
+    stop2("`maxInbreeding` must be a single number in the range [0, 1]: ", maxInbreeding %||% "NULL")
+
   # Convert `linearInb` to `maxLinearInb`
   maxLinearInb = if(isTRUE(linearInb)) Inf else if(isFALSE(linearInb)) 0 else linearInb
+
+  # If maxInbreeding disallows the weakest linear inbreeding, set the latter to 0
+  if(maxLinearInb > 0 && (maxInbreeding == 0 || maxInbreeding < 1/2^(maxLinearInb + 1))) {
+    maxLinearInb = 0
+    linearInb = "FALSE (adj)" # only used in glue below
+  }
 
   if(verbose) {
     .knownPO = sapply(knownPO, paste, collapse = "-")
@@ -136,24 +161,47 @@ buildPeds = function(labs, sex, extra = "parents", age = NULL, knownPO = NULL, a
         No children: {toStr(noChildren)}
         Connected only: {connected}
         Symmetry filter: {sexSymmetry}
+        Max inbreeding: {maxInbreeding}
         Linear inbreeding: {linearInb}"
     ))
   }
 
-  if(extra == "parents") {
+  if(identical(extra, "parents")) {
     buildPedsParents(labs = labs, sex = sex, ageMat = ageMat, knownPO = knownPO_int,
                      allKnown = allKnown, notPO = notPO_int, noChildren = noChildren_int,
-                     connected = connected, maxLinearInb = maxLinearInb,
+                     connected = connected, maxInbreeding = maxInbreeding, maxLinearInb = maxLinearInb,
                      sexSymmetry = sexSymmetry, verbose = verbose)
   }
   else {
     buildPedsExtra(labs = labs, sex = sex, extra = extra, ageMat = ageMat, knownPO = knownPO_int,
                    allKnown = allKnown, notPO = notPO_int, noChildren = noChildren_int,
-                   connected = connected, maxLinearInb = maxLinearInb,
+                   connected = connected, maxInbreeding = maxInbreeding, maxLinearInb = maxLinearInb,
                    sexSymmetry = sexSymmetry, verbose = verbose)
   }
 }
 
+
+convertKnownSub = function(knownSub, labs, sex) {
+  if(!is.ped(knownSub))
+    stop2("Argument `knownSub` must be a `ped` object. Received class: ", class(knownSub))
+
+  # Overlapping individuals
+  ids = intersect(labels(knownSub), labs)
+  if(length(ids) < 2)
+    stop2("`knownSub` must contain at least two of the indicated individuals")
+
+  names(sex) = labs
+  if(!all(getSex(knownSub, ids) == sex[ids]))
+    stop2("Member of `knownSub` has wrong sex: ", ids[getSex(knownSub, ids) != sex[ids]])
+
+  pomat = which(ped2adj(knownSub)[ids, ids], arr.ind = T)
+  pomat[] = ids[pomat]
+
+  knownPO = lapply(seq_len(nrow(pomat)), function(i) unname(pomat[i, ]))
+  age = paste(pomat[, 1], pomat[, 2], sep = ">")
+
+  list(knownPO = knownPO, age = age)
+}
 
 
 # Convert numeric age vector to string inequalities: "A>B,C,D", B>C"
@@ -187,7 +235,7 @@ convertNumAge = function(age, labs) {
   unlist(s)
 }
 
-# Convert vector to string inequalities: "A>B,C,D", B>C" to matrix
+# Convert vector to string inequalities: "A>B,C,D", B>C" to internal matrix
 parseAge = function(a, labs, output = c("matrix", "list")) {
   if(is.null(a) || all(is.na(a)))
     return(NULL)
@@ -213,6 +261,6 @@ parseAge = function(a, labs, output = c("matrix", "list")) {
 
   # Convert to internal ordering
   cbind(younger = match(res[, "younger"], labs),
-        older = match(res[, "older"], labs))
+        older   = match(res[, "older"],   labs))
 }
 
